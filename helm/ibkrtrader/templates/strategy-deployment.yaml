@@ -1,0 +1,124 @@
+{{/*
+  One Deployment + Service + ConfigMap per enabled strategy in
+  .Values.strategies. clientId uniqueness is validated up-front; an
+  invalid input fails the install with a clear error rather than
+  silently producing two pods racing for the same IBKR client slot.
+*/}}
+{{- include "ibkrtrader.validateClientIds" . -}}
+{{- $root := . -}}
+{{- range $strategy := .Values.strategies }}
+{{- if $strategy.enabled }}
+{{- $name := printf "%s-strategy-%s" (include "ibkrtrader.fullname" $root) $strategy.name -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: strategy
+    ibkrtrader.io/strategy: {{ $strategy.name }}
+data:
+  config.yaml: |
+    name: {{ $strategy.name }}
+    clientId: {{ $strategy.clientId }}
+    config:
+      {{- toYaml ($strategy.config | default dict) | nindent 6 }}
+    risk:
+      {{- toYaml ($strategy.risk | default dict) | nindent 6 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: strategy
+    ibkrtrader.io/strategy: {{ $strategy.name }}
+  annotations:
+    ibkrtrader.io/clientId: {{ $strategy.clientId | quote }}
+spec:
+  # Hard cap at 1: a strategy holds a single IBKR client slot. Two
+  # replicas would either collide on clientId or trade twice.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ibkrtrader.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: strategy
+      ibkrtrader.io/strategy: {{ $strategy.name }}
+  template:
+    metadata:
+      labels:
+        {{- include "ibkrtrader.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: strategy
+        ibkrtrader.io/strategy: {{ $strategy.name }}
+      annotations:
+        # Restart pod when config changes
+        checksum/config: {{ toYaml $strategy | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "ibkrtrader.serviceAccountName" $root }}
+      containers:
+        - name: strategy
+          image: "{{ $strategy.image.repository }}:{{ $strategy.image.tag }}"
+          imagePullPolicy: {{ $strategy.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: STRATEGY_NAME
+              value: {{ $strategy.name | quote }}
+            - name: IBKR_CLIENT_ID
+              value: {{ $strategy.clientId | quote }}
+            - name: RISK_GATEWAY_URL
+              value: {{ printf "http://%s-risk-gateway.%s.svc.cluster.local:%v" (include "ibkrtrader.fullname" $root) $root.Release.Namespace $root.Values.riskGateway.port | quote }}
+            {{- include "ibkrtrader.commonEnv" $root | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/strategy
+              readOnly: true
+          resources:
+            {{- toYaml $strategy.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: strategy
+    ibkrtrader.io/strategy: {{ $strategy.name }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "ibkrtrader.selectorLabels" $root | nindent 4 }}
+    app.kubernetes.io/component: strategy
+    ibkrtrader.io/strategy: {{ $strategy.name }}
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+{{- end }}
+{{- end }}

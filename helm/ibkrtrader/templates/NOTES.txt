@@ -1,0 +1,31 @@
+ibkrtrader v{{ .Chart.AppVersion }} installed.
+
+Mode: {{ .Values.ibkr.mode }}
+Account: {{ .Values.ibkr.account | default "(not set)" }}
+Active gateway: {{ include "ibkrtrader.activeGatewayHost" . }}:{{ include "ibkrtrader.activeGatewayPort" . }}
+
+Enabled strategies:
+{{- range .Values.strategies }}
+  {{- if .enabled }}
+  - {{ .name }} (clientId={{ .clientId }}, image={{ .image.repository }}:{{ .image.tag }})
+  {{- end }}
+{{- end }}
+
+Next steps:
+  1. Verify pods come up:
+       kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+  2. Tail the gateway log to confirm IBKR auth:
+       kubectl -n {{ .Release.Namespace }} logs sts/{{ include "ibkrtrader.fullname" . }}-ibgw-{{ .Values.ibkr.mode }} -f
+
+  3. Port-forward the dashboard:
+       kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ibkrtrader.fullname" . }}-dashboard 3000:{{ .Values.dashboard.port }}
+
+  4. For emergencies, port-forward VNC into the gateway:
+       kubectl -n {{ .Release.Namespace }} port-forward sts/{{ include "ibkrtrader.fullname" . }}-ibgw-{{ .Values.ibkr.mode }} 5900:{{ .Values.ibkr.gateways.paper.vncPort }}
+
+REMINDERS:
+  - IBKR positions aggregate at the account level. clientId only isolates
+    order modification rights, not positions. See docs/architecture.md.
+  - Sunday 01:00 ET requires a manual 2FA tap. Set a phone alarm.
+  - Pre-trade kill switch is {{ if .Values.riskMonitor.killSwitchEnabled }}ENABLED{{ else }}DISABLED{{ end }}.

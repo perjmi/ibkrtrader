@@ -1,0 +1,110 @@
+{{- if .Values.riskGateway.enabled -}}
+{{- $name := printf "%s-risk-gateway" (include "ibkrtrader.fullname" .) -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-gateway
+data:
+  global.yaml: |
+    {{- toYaml .Values.riskGateway.global | nindent 4 }}
+  strategies.yaml: |
+    {{- range $s := .Values.strategies }}
+    {{- if $s.enabled }}
+    - name: {{ $s.name }}
+      clientId: {{ $s.clientId }}
+      risk:
+        {{- toYaml ($s.risk | default dict) | nindent 8 }}
+    {{- end }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-gateway
+spec:
+  replicas: {{ .Values.riskGateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ibkrtrader.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: risk-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "ibkrtrader.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: risk-gateway
+      annotations:
+        checksum/config: {{ printf "%s-%s" (toYaml .Values.riskGateway) (toYaml .Values.strategies) | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "ibkrtrader.serviceAccountName" . }}
+      containers:
+        - name: risk-gateway
+          image: "{{ .Values.riskGateway.image.repository }}:{{ .Values.riskGateway.image.tag }}"
+          imagePullPolicy: {{ .Values.riskGateway.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.riskGateway.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.riskGateway.port | quote }}
+            {{- include "ibkrtrader.commonEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/risk-gateway
+              readOnly: true
+          resources:
+            {{- toYaml .Values.riskGateway.resources | nindent 12 }}
+          # Fail-closed: if /readyz reports an unreachable state DB the
+          # pod stops accepting traffic, strategies see 503 and halt.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-gateway
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ibkrtrader.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-gateway
+  ports:
+    - name: http
+      port: {{ .Values.riskGateway.port }}
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

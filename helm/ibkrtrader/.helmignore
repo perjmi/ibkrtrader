@@ -1,0 +1,17 @@
+# Patterns to ignore when building packages.
+.DS_Store
+.git/
+.gitignore
+.idea/
+.vscode/
+*.tmproj
+*.swp
+*.bak
+*.tmp
+*~
+.project
+.tox/
+.coverage
+*.pyc
+__pycache__/
+charts/*.tgz

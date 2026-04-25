@@ -1,0 +1,38 @@
+{{- if and (index .Values "cloudnative-pg" "enabled") .Values.timescale.cluster.enabled -}}
+{{- $name := printf "%s-timescale" (include "ibkrtrader.fullname" .) -}}
+{{/*
+  Requires the CloudNativePG operator (installed via the chart dependency).
+  We use a CNPG-compatible Postgres image with TimescaleDB preloaded —
+  the upstream CNPG image does NOT bundle Timescale and the Timescale
+  Docker image is incompatible with the CNPG operator (different uid,
+  different distro). The clevyr image bridges that gap.
+*/}}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: timescale
+spec:
+  instances: {{ .Values.timescale.cluster.instances }}
+  imageName: "{{ .Values.timescale.cluster.image.repository }}:{{ .Values.timescale.cluster.image.tag }}"
+  postgresql:
+    parameters:
+      {{- toYaml .Values.timescale.cluster.postgresql.parameters | nindent 6 }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.timescale.cluster.bootstrap.database | quote }}
+      owner: {{ .Values.timescale.cluster.bootstrap.owner | quote }}
+      postInitTemplateSQL:
+        - "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+  storage:
+    size: {{ .Values.timescale.cluster.storage.size | quote }}
+    {{- if or .Values.timescale.cluster.storage.storageClass .Values.global.storageClass }}
+    storageClass: {{ default .Values.global.storageClass .Values.timescale.cluster.storage.storageClass | quote }}
+    {{- end }}
+  monitoring:
+    enablePodMonitor: {{ .Values.serviceMonitors.enabled }}
+{{- end }}

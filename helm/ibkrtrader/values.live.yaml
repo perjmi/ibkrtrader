@@ -1,0 +1,20 @@
+# Override file for LIVE deployments.
+# helm install trader-live ./helm/ibkrtrader -f values.live.yaml
+#
+# DO NOT enable both paper and live in the same release without intent.
+# Run two separate releases (different namespace) if you need both.
+ibkr:
+  mode: live
+  gateways:
+    paper:
+      enabled: false
+    live:
+      enabled: true
+
+riskMonitor:
+  killSwitchEnabled: true
+
+# Tighter limits by default in live.
+riskGateway:
+  global:
+    maxAccountDrawdownPct: 0.02

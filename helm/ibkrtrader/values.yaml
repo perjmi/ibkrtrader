@@ -1,0 +1,253 @@
+# ============================================================================
+# ibkrtrader — default values
+#
+# This is the v0 surface. Most components reference placeholder images
+# (registry.local/ibkrtrader/...) that you build yourself. The chart is
+# designed to deploy a complete topology even with placeholders so wiring
+# can be verified end-to-end.
+# ============================================================================
+
+global:
+  imageRegistry: registry.local
+  imagePullSecrets: []
+  storageClass: ""
+
+# ----------------------------------------------------------------------------
+# IBKR Gateway
+# ----------------------------------------------------------------------------
+ibkr:
+  # mode selects which gateway StatefulSet strategies point at.
+  # Both StatefulSets can be deployed simultaneously by enabling both
+  # gateways below; this flag only steers default DNS resolution.
+  mode: paper          # paper | live
+  account: ""          # IBKR account ID, e.g. U1234567
+
+  # Per-mode gateway configuration. Disable one to save resources.
+  gateways:
+    paper:
+      enabled: true
+      image:
+        repository: ghcr.io/gnzsnz/ib-gateway
+        tag: stable
+        pullPolicy: IfNotPresent
+      apiPort: 4002
+      vncPort: 5900
+      # IBC auto-restart time (Toronto) — gateway restarts inside the
+      # existing session window so daily 2FA is not re-prompted. The
+      # weekly Sunday 01:00 ET reset still requires a manual tap.
+      autoRestartTime: "11:55 PM"
+      twoFaTimeoutAction: restart
+      readOnlyApi: false
+      resources:
+        requests: { cpu: 500m, memory: 1500Mi }
+        limits:   { cpu: "2",  memory: 3Gi }
+      persistence:
+        enabled: true
+        size: 5Gi
+        accessMode: ReadWriteOnce
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+
+    live:
+      enabled: false
+      image:
+        repository: ghcr.io/gnzsnz/ib-gateway
+        tag: stable
+        pullPolicy: IfNotPresent
+      apiPort: 4001
+      vncPort: 5900
+      autoRestartTime: "11:55 PM"
+      twoFaTimeoutAction: restart
+      readOnlyApi: false
+      resources:
+        requests: { cpu: 500m, memory: 1500Mi }
+        limits:   { cpu: "2",  memory: 3Gi }
+      persistence:
+        enabled: true
+        size: 5Gi
+        accessMode: ReadWriteOnce
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+
+  # Credentials. In production replace with externalSecrets or sealed-secrets.
+  credentials:
+    # If existingSecret is set, the chart will not create a Secret.
+    # Expected keys: TWS_USERID, TWS_PASSWORD.
+    existingSecret: ""
+    username: ""
+    password: ""
+
+# ----------------------------------------------------------------------------
+# Strategies
+#
+# Each entry produces:
+#   - one Deployment (image, resources, env, configmap mount)
+#   - one Service (for /metrics scraping)
+#   - one ConfigMap (strategy-specific config rendered as YAML)
+#
+# clientId MUST be unique across all strategies — _helpers.tpl validates this
+# at template-render time and fails the install if there are collisions.
+# ----------------------------------------------------------------------------
+strategies:
+  - name: hello
+    enabled: true
+    image:
+      repository: registry.local/ibkrtrader/strategy-hello
+      tag: v0
+      pullPolicy: IfNotPresent
+    clientId: 11
+    replicas: 1
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+    config:
+      universe: ["AAPL"]
+      barSize: "1 min"
+    risk:
+      maxOrderNotional: 1000
+      maxPosition: 10
+      maxDailyLoss: 100
+      maxOrdersPerSecond: 1
+
+# ----------------------------------------------------------------------------
+# Risk plane
+# ----------------------------------------------------------------------------
+riskGateway:
+  enabled: true
+  image:
+    repository: registry.local/ibkrtrader/risk-gateway
+    tag: v0
+    pullPolicy: IfNotPresent
+  replicas: 2
+  port: 8080
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+  # Account-wide pre-trade limits. Enforced in addition to per-strategy
+  # limits in `.Values.strategies[].risk`.
+  global:
+    maxAccountDrawdownPct: 0.05
+    maxGrossExposure: 1000000
+    maxOrdersPerSecond: 50
+    restrictedSymbols: []
+
+riskMonitor:
+  enabled: true
+  image:
+    repository: registry.local/ibkrtrader/risk-monitor
+    tag: v0
+    pullPolicy: IfNotPresent
+  replicas: 2          # leader-elected via Lease
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  # Drift / breach evaluation cadence
+  reconcileIntervalSeconds: 10
+  # Whether the monitor is allowed to scale strategy Deployments to 0.
+  # Disable in dev to avoid accidental kills.
+  killSwitchEnabled: true
+
+# ----------------------------------------------------------------------------
+# API + dashboard
+# ----------------------------------------------------------------------------
+api:
+  enabled: true
+  image:
+    repository: registry.local/ibkrtrader/api
+    tag: v0
+    pullPolicy: IfNotPresent
+  replicas: 2
+  port: 8000
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+dashboard:
+  enabled: true
+  image:
+    repository: registry.local/ibkrtrader/dashboard
+    tag: v0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3000
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  ingress:
+    enabled: false
+    className: ""
+    host: trader.example.com
+    annotations: {}
+    tls: []
+
+# ----------------------------------------------------------------------------
+# Data plane
+# ----------------------------------------------------------------------------
+
+# CloudNativePG: the operator is installed via the chart dependency.
+# `timescale.cluster` configures the per-release Cluster CR.
+# Key name is "cloudnative-pg" because the dependency alias removed.
+cloudnative-pg:
+  enabled: true
+
+timescale:
+  cluster:
+    enabled: true
+    instances: 1                       # bump to 3 for HA
+    image:
+      # CNPG-compatible Postgres image with TimescaleDB extension preloaded.
+      repository: ghcr.io/clevyr/cloudnativepg-timescale
+      tag: "17"
+    storage:
+      size: 20Gi
+      storageClass: ""
+    postgresql:
+      parameters:
+        shared_preload_libraries: "timescaledb"
+        max_connections: "200"
+    bootstrap:
+      database: trader
+      owner: trader
+    # Plug in S3 backups in v1.
+    backup:
+      enabled: false
+
+# NATS via subchart. Default config = JetStream enabled, file storage.
+nats:
+  enabled: true
+  config:
+    cluster:
+      enabled: false                   # bump to 3-node cluster for HA
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          size: 10Gi
+
+# JetStream streams declared in nats-streams.yaml (NACK CRDs, applied
+# only if the NACK controller is installed — disabled by default).
+jetstreamStreams:
+  enabled: false
+
+# ----------------------------------------------------------------------------
+# Observability
+# ----------------------------------------------------------------------------
+serviceMonitors:
+  # Requires the Prometheus Operator CRDs (kube-prometheus-stack).
+  enabled: false
+  interval: 30s
+  labels: {}
+
+# ----------------------------------------------------------------------------
+# RBAC
+# ----------------------------------------------------------------------------
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ""                             # generated from chart name if empty

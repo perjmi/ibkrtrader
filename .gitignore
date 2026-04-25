@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Helm dependency artifacts (run `helm dependency build` to populate)
+helm/**/charts/*.tgz
+helm/**/charts/*/
+helm/**/Chart.lock
+
+# oh-my-claudecode runtime state
+.omc/

@@ -1,0 +1,68 @@
+{{- if .Values.jetstreamStreams.enabled -}}
+{{/*
+  Declarative JetStream stream definitions via NACK CRDs.
+  Requires the NACK controller (https://github.com/nats-io/nack)
+  to be installed in the cluster. Disabled by default; enable in
+  values.yaml after installing NACK.
+*/}}
+---
+apiVersion: jetstream.nats.io/v1beta2
+kind: Stream
+metadata:
+  name: orders
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+spec:
+  name: ORDERS
+  subjects: ["orders.>"]
+  retention: limits
+  storage: file
+  maxAge: 168h          # 7 days
+  replicas: 1
+---
+apiVersion: jetstream.nats.io/v1beta2
+kind: Stream
+metadata:
+  name: fills
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+spec:
+  name: FILLS
+  subjects: ["fills.>"]
+  retention: limits
+  storage: file
+  maxAge: 0             # forever (mirror to S3 in v2)
+  replicas: 1
+---
+apiVersion: jetstream.nats.io/v1beta2
+kind: Stream
+metadata:
+  name: marketdata
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+spec:
+  name: MARKETDATA
+  subjects: ["marketdata.>"]
+  retention: limits
+  storage: memory       # ephemeral
+  maxAge: 1h
+  replicas: 1
+---
+apiVersion: jetstream.nats.io/v1beta2
+kind: Stream
+metadata:
+  name: risk
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+spec:
+  name: RISK
+  subjects: ["risk.>", "pnl.>"]
+  retention: limits
+  storage: file
+  maxAge: 720h          # 30 days
+  replicas: 1
+{{- end }}

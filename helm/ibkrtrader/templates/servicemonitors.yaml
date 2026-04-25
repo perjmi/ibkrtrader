@@ -1,0 +1,52 @@
+{{- if .Values.serviceMonitors.enabled -}}
+{{/*
+  Requires Prometheus Operator CRDs (kube-prometheus-stack).
+  One ServiceMonitor per component that exposes /metrics.
+*/}}
+{{- $components := list "risk-gateway" "api" -}}
+{{- range $component := $components }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ printf "%s-%s" (include "ibkrtrader.fullname" $) $component }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+    {{- with $.Values.serviceMonitors.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ibkrtrader.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+  endpoints:
+    - port: metrics
+      interval: {{ $.Values.serviceMonitors.interval }}
+      path: /metrics
+{{- end }}
+# Strategies: one ServiceMonitor selecting all of them.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ printf "%s-strategies" (include "ibkrtrader.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: strategy
+    {{- with .Values.serviceMonitors.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ibkrtrader.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: strategy
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.serviceMonitors.interval }}
+      path: /metrics
+{{- end }}

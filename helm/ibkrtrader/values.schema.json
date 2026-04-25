@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ibkrtrader values",
+  "type": "object",
+  "required": ["ibkr", "strategies"],
+  "properties": {
+    "global": { "type": "object" },
+    "ibkr": {
+      "type": "object",
+      "required": ["mode", "gateways"],
+      "properties": {
+        "mode": { "enum": ["paper", "live"] },
+        "account": { "type": "string" },
+        "gateways": {
+          "type": "object",
+          "properties": {
+            "paper": { "$ref": "#/$defs/gateway" },
+            "live":  { "$ref": "#/$defs/gateway" }
+          }
+        },
+        "credentials": {
+          "type": "object",
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": "string" }
+          }
+        }
+      }
+    },
+    "strategies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "clientId", "image"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,38}[a-z0-9])?$" },
+          "enabled": { "type": "boolean", "default": true },
+          "clientId": { "type": "integer", "minimum": 1, "maximum": 32767 },
+          "replicas": { "type": "integer", "minimum": 1, "maximum": 1 },
+          "image": { "$ref": "#/$defs/image" },
+          "resources": { "type": "object" },
+          "config": { "type": "object" },
+          "risk": {
+            "type": "object",
+            "properties": {
+              "maxOrderNotional": { "type": "number" },
+              "maxPosition": { "type": "number" },
+              "maxDailyLoss": { "type": "number" },
+              "maxOrdersPerSecond": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "riskGateway": { "type": "object" },
+    "riskMonitor": { "type": "object" },
+    "api": { "type": "object" },
+    "dashboard": { "type": "object" },
+    "cloudnative-pg": { "type": "object" },
+    "timescale": { "type": "object" },
+    "nats": { "type": "object" },
+    "jetstreamStreams": { "type": "object" },
+    "serviceMonitors": { "type": "object" },
+    "rbac": { "type": "object" },
+    "serviceAccount": { "type": "object" }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": ["string", "number"] },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "$ref": "#/$defs/image" },
+        "apiPort": { "type": "integer" },
+        "vncPort": { "type": "integer" },
+        "autoRestartTime": { "type": "string" },
+        "twoFaTimeoutAction": { "enum": ["restart", "exit", "manual"] },
+        "readOnlyApi": { "type": "boolean" },
+        "resources": { "type": "object" },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "size": { "type": "string" },
+            "accessMode": { "type": "string" }
+          }
+        },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    }
+  }
+}

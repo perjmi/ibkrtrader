@@ -1,0 +1,123 @@
+{{- if .Values.riskMonitor.enabled -}}
+{{- $name := printf "%s-risk-monitor" (include "ibkrtrader.fullname" .) -}}
+{{- $sa := printf "%s-risk-monitor" (include "ibkrtrader.fullname" .) -}}
+---
+# Dedicated ServiceAccount — the monitor needs RBAC to scale strategy
+# Deployments to 0 (the kill switch). Other components don't.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-monitor
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-monitor
+rules:
+  # Scale strategy Deployments to 0 on breach.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Leader election (the monitor runs replicas=2 with one leader).
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read its own ConfigMap so config reload doesn't require a restart.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Emit Events visible in `kubectl describe`.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" . | nindent 4 }}
+    app.kubernetes.io/component: risk-monitor
+spec:
+  replicas: {{ .Values.riskMonitor.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      {{- include "ibkrtrader.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: risk-monitor
+  template:
+    metadata:
+      labels:
+        {{- include "ibkrtrader.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: risk-monitor
+    spec:
+      serviceAccountName: {{ $sa }}
+      containers:
+        - name: risk-monitor
+          image: "{{ .Values.riskMonitor.image.repository }}:{{ .Values.riskMonitor.image.tag }}"
+          imagePullPolicy: {{ .Values.riskMonitor.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: KILL_SWITCH_ENABLED
+              value: {{ .Values.riskMonitor.killSwitchEnabled | quote }}
+            - name: RECONCILE_INTERVAL_SECONDS
+              value: {{ .Values.riskMonitor.reconcileIntervalSeconds | quote }}
+            - name: LEADER_ELECTION_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: LEADER_ELECTION_NAME
+              value: {{ $name | quote }}
+            - name: STRATEGY_LABEL_SELECTOR
+              value: "app.kubernetes.io/component=strategy,app.kubernetes.io/instance={{ .Release.Name }}"
+            - name: GLOBAL_MAX_DRAWDOWN_PCT
+              value: {{ .Values.riskGateway.global.maxAccountDrawdownPct | quote }}
+            {{- include "ibkrtrader.commonEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.riskMonitor.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 30
+            failureThreshold: 3
+{{- end }}

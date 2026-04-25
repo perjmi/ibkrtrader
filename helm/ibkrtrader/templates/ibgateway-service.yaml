@@ -1,0 +1,32 @@
+{{- range $mode, $gw := .Values.ibkr.gateways }}
+{{- if $gw.enabled }}
+{{- $name := printf "%s-ibgw-%s" (include "ibkrtrader.fullname" $) $mode -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: ibgateway
+    ibkrtrader.io/mode: {{ $mode }}
+spec:
+  # Headless so DNS resolves directly to the pod (we never want a LB
+  # in front of a stateful trading socket).
+  clusterIP: None
+  selector:
+    {{- include "ibkrtrader.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: ibgateway
+    ibkrtrader.io/mode: {{ $mode }}
+  ports:
+    - name: api
+      port: {{ $gw.apiPort }}
+      targetPort: api
+      protocol: TCP
+    - name: vnc
+      port: {{ $gw.vncPort }}
+      targetPort: vnc
+      protocol: TCP
+{{- end }}
+{{- end }}

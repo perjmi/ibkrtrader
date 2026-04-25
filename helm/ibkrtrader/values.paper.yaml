@@ -1,0 +1,12 @@
+# Override file for paper-trading deployments.
+# helm install trader-paper ./helm/ibkrtrader -f values.paper.yaml
+ibkr:
+  mode: paper
+  gateways:
+    paper:
+      enabled: true
+    live:
+      enabled: false
+
+riskMonitor:
+  killSwitchEnabled: false   # safer default in paper

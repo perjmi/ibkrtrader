@@ -1,0 +1,117 @@
+{{- range $mode, $gw := .Values.ibkr.gateways }}
+{{- if $gw.enabled }}
+{{- $name := printf "%s-ibgw-%s" (include "ibkrtrader.fullname" $) $mode -}}
+{{- $secretName := default (printf "%s-ibkr" (include "ibkrtrader.fullname" $)) $.Values.ibkr.credentials.existingSecret -}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ibkrtrader.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: ibgateway
+    ibkrtrader.io/mode: {{ $mode }}
+spec:
+  # Replicas MUST be 1. Two pods racing for the same login locks the account.
+  replicas: 1
+  serviceName: {{ $name }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "ibkrtrader.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: ibgateway
+      ibkrtrader.io/mode: {{ $mode }}
+  template:
+    metadata:
+      labels:
+        {{- include "ibkrtrader.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: ibgateway
+        ibkrtrader.io/mode: {{ $mode }}
+    spec:
+      serviceAccountName: {{ include "ibkrtrader.serviceAccountName" $ }}
+      terminationGracePeriodSeconds: 30
+      {{- with $gw.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $gw.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $gw.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ibgateway
+          image: "{{ $gw.image.repository }}:{{ $gw.image.tag }}"
+          imagePullPolicy: {{ $gw.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: api
+              containerPort: {{ $gw.apiPort }}
+              protocol: TCP
+            - name: vnc
+              containerPort: {{ $gw.vncPort }}
+              protocol: TCP
+          env:
+            - name: TRADING_MODE
+              value: {{ $mode | quote }}
+            - name: TWS_USERID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: TWS_USERID
+            - name: TWS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: TWS_PASSWORD
+            - name: AUTO_RESTART_TIME
+              value: {{ $gw.autoRestartTime | quote }}
+            - name: TWOFA_TIMEOUT_ACTION
+              value: {{ $gw.twoFaTimeoutAction | quote }}
+            - name: READ_ONLY_API
+              value: {{ $gw.readOnlyApi | ternary "yes" "no" | quote }}
+            - name: BYPASS_WARNING
+              value: "yes"
+            - name: TZ
+              value: "America/New_York"
+          resources:
+            {{- toYaml $gw.resources | nindent 12 }}
+          volumeMounts:
+            {{- if $gw.persistence.enabled }}
+            - name: jts
+              mountPath: /home/ibgateway/Jts
+            {{- end }}
+          # Cold boot is slow (Java + Xvfb + IBC + IBKR auth handshake).
+          startupProbe:
+            tcpSocket:
+              port: api
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 30   # ~5 min budget
+          readinessProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 30
+            failureThreshold: 5    # tolerate IBKR brownouts
+  {{- if $gw.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: jts
+      spec:
+        accessModes: [ {{ $gw.persistence.accessMode | quote }} ]
+        {{- if $.Values.global.storageClass }}
+        storageClassName: {{ $.Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $gw.persistence.size | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

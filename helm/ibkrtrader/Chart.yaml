@@ -1,0 +1,31 @@
+apiVersion: v2
+name: ibkrtrader
+description: |
+  Multi-strategy trading platform on a single IBKR account.
+  Bundles IBKR Gateway, N strategy pods, an in-path risk gateway,
+  an out-of-band risk monitor, NATS JetStream, TimescaleDB on
+  CloudNativePG, and a Next.js + FastAPI dashboard.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.28.0"
+keywords:
+  - trading
+  - ibkr
+  - interactive-brokers
+  - quant
+home: https://github.com/perjmi/ibkrtrader
+sources:
+  - https://github.com/perjmi/ibkrtrader
+maintainers:
+  - name: perjmi
+    email: perjmi@gmail.com
+dependencies:
+  - name: nats
+    version: "1.2.x"
+    repository: https://nats-io.github.io/k8s/helm/charts/
+    condition: nats.enabled
+  - name: cloudnative-pg
+    version: "0.22.x"
+    repository: https://cloudnative-pg.github.io/charts
+    condition: cloudnative-pg.enabled
